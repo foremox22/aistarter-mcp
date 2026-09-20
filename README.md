@@ -110,3 +110,5 @@ npx -y aistarter-mcp-ui
 ```
 
 Opens `http://127.0.0.1:4870` (binds to localhost only) and tries to launch your browser automatically. Override the port with `UI_PORT=4871 npx -y aistarter-mcp-ui`. (Building from source: `npm run ui` instead.)
+
+The UI is available in **English, Thai, Chinese, Japanese, Indonesian, Vietnamese, and Russian** — it auto-detects your browser's language on first visit, and there's a language switcher at the top of the page (persisted via cookie). Note this only translates the UI's own labels/headings; your actual interview answers, scope, architecture, etc. are shown exactly as you entered them, in whatever language that was.

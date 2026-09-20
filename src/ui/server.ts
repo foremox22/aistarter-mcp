@@ -2,107 +2,137 @@
 import { createServer } from "node:http";
 import { exec } from "node:child_process";
 import { listSessions, loadSession } from "../store.js";
-import { QUESTIONS } from "../questions.js";
 import type { Session } from "../types.js";
 import { escapeHtml, page } from "./html.js";
+import { detectLocale, isLocale, questionText, t, type Locale } from "./i18n.js";
 
 const PORT = Number(process.env.UI_PORT ?? 4870);
+const APP_NAME = "Senior Dev in a Box";
 
-function stageBadge(stage: Session["stage"]): string {
-  const labels: Record<Session["stage"], string> = {
-    scoping: "Interviewing",
-    ready_for_scope: "Ready for scope",
-    architecture: "Scoping architecture",
-    schema: "Designing schema",
-    roadmap: "Building roadmap",
-    done: "Done",
+function parseCookies(header: string | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!header) return out;
+  for (const part of header.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx === -1) continue;
+    out[part.slice(0, idx).trim()] = decodeURIComponent(part.slice(idx + 1).trim());
+  }
+  return out;
+}
+
+function stageBadge(stage: Session["stage"], locale: Locale): string {
+  const keys: Record<Session["stage"], string> = {
+    scoping: "stageScoping",
+    ready_for_scope: "stageReadyForScope",
+    architecture: "stageArchitecture",
+    schema: "stageSchema",
+    roadmap: "stageRoadmap",
+    done: "stageDone",
   };
-  return `<span class="badge">${escapeHtml(labels[stage] ?? stage)}</span>`;
+  return `<span class="badge">${escapeHtml(t(locale, keys[stage] ?? stage))}</span>`;
 }
 
-function questionText(id: string): string {
-  return QUESTIONS.find((q) => q.id === id)?.text ?? id;
+const EXP_KEYS: Record<string, string> = {
+  "total-beginner": "expTotalBeginner",
+  "some-experience": "expSomeExperience",
+  experienced: "expExperienced",
+};
+const TOOL_KEYS: Record<string, string> = {
+  "claude-code": "toolClaudeCode",
+  codex: "toolCodex",
+  cursor: "toolCursor",
+  other: "toolOther",
+};
+
+function classificationLine(classification: Session["classification"], locale: Locale): string {
+  if (!classification) return "";
+  const exp = t(locale, EXP_KEYS[classification.experience_level] ?? classification.experience_level);
+  const tool = t(locale, TOOL_KEYS[classification.ai_tool] ?? classification.ai_tool);
+  return `${escapeHtml(exp)} · ${escapeHtml(tool)}`;
 }
 
-async function renderList(): Promise<string> {
+function projectTitle(session: Session, locale: Locale): string {
+  return session.scope?.one_liner ?? session.answers.find((a) => a.question_id === "one_liner")?.answer ?? t(locale, "untitledProject");
+}
+
+async function renderList(locale: Locale): Promise<string> {
   const sessions = await listSessions();
   if (sessions.length === 0) {
     return `
-      <h1>Senior Dev in a Box — sessions</h1>
-      <p class="sub">Every project you've interviewed through the aistarter MCP shows up here.</p>
-      <p class="empty">No sessions yet. Start one by talking to your AI agent — it will call start_session for you.</p>`;
+      <h1>${APP_NAME}</h1>
+      <p class="sub">${escapeHtml(t(locale, "listSub"))}</p>
+      <p class="empty">${escapeHtml(t(locale, "emptyMessage"))}</p>`;
   }
 
   const cards = sessions
     .map((s) => {
-      const title = s.scope?.one_liner ?? s.answers.find((a) => a.question_id === "one_liner")?.answer ?? "Untitled project";
+      const title = projectTitle(s, locale);
       const when = new Date(s.updated_at).toLocaleString();
-      const classification = s.classification
-        ? `${escapeHtml(s.classification.experience_level)} · ${escapeHtml(s.classification.ai_tool)}`
-        : "";
+      const classification = classificationLine(s.classification, locale);
       return `
       <a class="card card-link" href="/session/${encodeURIComponent(s.session_id)}">
         <div class="row">
           <span class="title">${escapeHtml(title)}</span>
-          ${stageBadge(s.stage)}
+          ${stageBadge(s.stage, locale)}
         </div>
-        <div class="meta">${classification}${classification ? " · " : ""}updated ${escapeHtml(when)}</div>
+        <div class="meta">${classification}${classification ? " · " : ""}${escapeHtml(t(locale, "updated"))} ${escapeHtml(when)}</div>
       </a>`;
     })
     .join("\n");
 
   return `
-    <h1>Senior Dev in a Box — sessions</h1>
-    <p class="sub">Every project you've interviewed through the aistarter MCP.</p>
+    <h1>${APP_NAME}</h1>
+    <p class="sub">${escapeHtml(t(locale, "listSub"))}</p>
     ${cards}`;
 }
 
-function renderScope(session: Session): string {
+function renderScope(session: Session, locale: Locale): string {
   const scope = session.scope;
-  if (!scope) return `<h2>Scope</h2><p class="empty">Not finalized yet.</p>`;
+  if (!scope) return `<h2>${escapeHtml(t(locale, "sectionScope"))}</h2><p class="empty">${escapeHtml(t(locale, "notFinalized"))}</p>`;
+  const yn = (v: boolean | undefined) => (v ? t(locale, "yes") : t(locale, "no"));
   const rows: string[] = [];
-  if (scope.primary_users) rows.push(`<dt>Primary users</dt><dd>${escapeHtml(scope.primary_users)}</dd>`);
-  if (scope.platforms?.length) rows.push(`<dt>Platforms</dt><dd>${escapeHtml(scope.platforms.join(", "))}</dd>`);
-  rows.push(`<dt>Realtime</dt><dd>${scope.needs_realtime ? "Yes" : "No"}</dd>`);
-  rows.push(`<dt>Accounts</dt><dd>${scope.needs_accounts ? "Yes" : "No"}</dd>`);
-  rows.push(`<dt>Payments</dt><dd>${scope.needs_payments ? "Yes" : "No"}</dd>`);
-  rows.push(`<dt>Admin dashboard</dt><dd>${scope.needs_admin_dashboard ? "Yes" : "No"}</dd>`);
-  if (scope.estimated_scale) rows.push(`<dt>Scale</dt><dd>${escapeHtml(scope.estimated_scale)}</dd>`);
-  if (scope.constraints) rows.push(`<dt>Constraints</dt><dd>${escapeHtml(scope.constraints)}</dd>`);
+  if (scope.primary_users) rows.push(`<dt>${escapeHtml(t(locale, "primaryUsers"))}</dt><dd>${escapeHtml(scope.primary_users)}</dd>`);
+  if (scope.platforms?.length) rows.push(`<dt>${escapeHtml(t(locale, "platforms"))}</dt><dd>${escapeHtml(scope.platforms.join(", "))}</dd>`);
+  rows.push(`<dt>${escapeHtml(t(locale, "realtime"))}</dt><dd>${escapeHtml(yn(scope.needs_realtime))}</dd>`);
+  rows.push(`<dt>${escapeHtml(t(locale, "accounts"))}</dt><dd>${escapeHtml(yn(scope.needs_accounts))}</dd>`);
+  rows.push(`<dt>${escapeHtml(t(locale, "payments"))}</dt><dd>${escapeHtml(yn(scope.needs_payments))}</dd>`);
+  rows.push(`<dt>${escapeHtml(t(locale, "adminDashboard"))}</dt><dd>${escapeHtml(yn(scope.needs_admin_dashboard))}</dd>`);
+  if (scope.estimated_scale) rows.push(`<dt>${escapeHtml(t(locale, "scale"))}</dt><dd>${escapeHtml(scope.estimated_scale)}</dd>`);
+  if (scope.constraints) rows.push(`<dt>${escapeHtml(t(locale, "constraints"))}</dt><dd>${escapeHtml(scope.constraints)}</dd>`);
   const features = scope.must_have_features?.length
     ? `<ul>${scope.must_have_features.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul>`
     : "";
   return `
-    <h2>Scope</h2>
+    <h2>${escapeHtml(t(locale, "sectionScope"))}</h2>
     <div class="card">
       ${scope.one_liner ? `<p><strong>${escapeHtml(scope.one_liner)}</strong></p>` : ""}
       <dl>${rows.join("\n")}</dl>
-      ${features ? `<p class="meta" style="margin-top:12px">Must-have features</p>${features}` : ""}
+      ${features ? `<p class="meta" style="margin-top:12px">${escapeHtml(t(locale, "mustHaveFeatures"))}</p>${features}` : ""}
     </div>`;
 }
 
-function renderArchitecture(session: Session): string {
+function renderArchitecture(session: Session, locale: Locale): string {
   const arch = session.architecture;
-  if (!arch) return `<h2>Architecture</h2><p class="empty">Not finalized yet.</p>`;
+  if (!arch) return `<h2>${escapeHtml(t(locale, "sectionArchitecture"))}</h2><p class="empty">${escapeHtml(t(locale, "notFinalized"))}</p>`;
   const rows = [
-    arch.frontend ? `<dt>Frontend</dt><dd>${escapeHtml(arch.frontend)}</dd>` : "",
-    arch.backend ? `<dt>Backend</dt><dd>${escapeHtml(arch.backend)}</dd>` : "",
-    arch.database ? `<dt>Database</dt><dd>${escapeHtml(arch.database)}</dd>` : "",
-    arch.hosting ? `<dt>Hosting</dt><dd>${escapeHtml(arch.hosting)}</dd>` : "",
+    arch.frontend ? `<dt>${escapeHtml(t(locale, "frontend"))}</dt><dd>${escapeHtml(arch.frontend)}</dd>` : "",
+    arch.backend ? `<dt>${escapeHtml(t(locale, "backend"))}</dt><dd>${escapeHtml(arch.backend)}</dd>` : "",
+    arch.database ? `<dt>${escapeHtml(t(locale, "database"))}</dt><dd>${escapeHtml(arch.database)}</dd>` : "",
+    arch.hosting ? `<dt>${escapeHtml(t(locale, "hosting"))}</dt><dd>${escapeHtml(arch.hosting)}</dd>` : "",
   ]
     .filter(Boolean)
     .join("\n");
   return `
-    <h2>Architecture</h2>
+    <h2>${escapeHtml(t(locale, "sectionArchitecture"))}</h2>
     <div class="card">
       <dl>${rows}</dl>
       ${arch.rationale ? `<p class="meta" style="margin-top:12px">${escapeHtml(arch.rationale)}</p>` : ""}
     </div>`;
 }
 
-function renderSchema(session: Session): string {
+function renderSchema(session: Session, locale: Locale): string {
   const schema = session.schema;
-  if (!schema) return `<h2>Database schema</h2><p class="empty">Not finalized yet.</p>`;
+  if (!schema) return `<h2>${escapeHtml(t(locale, "sectionSchema"))}</h2><p class="empty">${escapeHtml(t(locale, "notFinalized"))}</p>`;
   const tables = (schema.collections ?? [])
     .map(
       (c) => `
@@ -113,17 +143,17 @@ function renderSchema(session: Session): string {
     )
     .join("\n");
   return `
-    <h2>Database schema</h2>
+    <h2>${escapeHtml(t(locale, "sectionSchema"))}</h2>
     <div class="card">
-      ${schema.archetype ? `<p class="meta">Archetype: ${escapeHtml(schema.archetype)}</p>` : ""}
+      ${schema.archetype ? `<p class="meta">${escapeHtml(t(locale, "archetype"))} ${escapeHtml(schema.archetype)}</p>` : ""}
       ${tables}
       ${schema.security_notes ? `<p class="meta" style="margin-top:12px">${escapeHtml(schema.security_notes)}</p>` : ""}
     </div>`;
 }
 
-function renderRoadmap(session: Session): string {
+function renderRoadmap(session: Session, locale: Locale): string {
   const roadmap = session.roadmap;
-  if (!roadmap) return `<h2>Roadmap</h2><p class="empty">Not finalized yet.</p>`;
+  if (!roadmap) return `<h2>${escapeHtml(t(locale, "sectionRoadmap"))}</h2><p class="empty">${escapeHtml(t(locale, "notFinalized"))}</p>`;
   const sprints = (roadmap.sprints ?? [])
     .map(
       (s) => `
@@ -134,68 +164,87 @@ function renderRoadmap(session: Session): string {
     )
     .join("\n");
   return `
-    <h2>Roadmap</h2>
+    <h2>${escapeHtml(t(locale, "sectionRoadmap"))}</h2>
     <div class="card">${sprints}</div>`;
 }
 
-function renderInterview(session: Session): string {
-  if (session.answers.length === 0) return `<h2>Interview</h2><p class="empty">No answers recorded yet.</p>`;
+function renderInterview(session: Session, locale: Locale): string {
+  if (session.answers.length === 0) {
+    return `<h2>${escapeHtml(t(locale, "sectionInterview"))}</h2><p class="empty">${escapeHtml(t(locale, "noAnswersYet"))}</p>`;
+  }
   const qa = session.answers
     .map(
       (a) => `
       <div class="qa">
-        <div class="q">${escapeHtml(questionText(a.question_id))}</div>
+        <div class="q">${escapeHtml(questionText(locale, a.question_id))}</div>
         <div class="a">${escapeHtml(a.answer)}</div>
       </div>`
     )
     .join("\n");
-  return `<h2>Interview</h2><div class="card">${qa}</div>`;
+  return `<h2>${escapeHtml(t(locale, "sectionInterview"))}</h2><div class="card">${qa}</div>`;
 }
 
-async function renderDetail(sessionId: string): Promise<string | undefined> {
+async function renderDetail(sessionId: string, locale: Locale): Promise<string | undefined> {
   const session = await loadSession(sessionId);
   if (!session) return undefined;
 
-  const title = session.scope?.one_liner ?? session.answers.find((a) => a.question_id === "one_liner")?.answer ?? "Untitled project";
-  const classification = session.classification
-    ? `${escapeHtml(session.classification.experience_level)} · ${escapeHtml(session.classification.ai_tool)}`
-    : "";
+  const title = projectTitle(session, locale);
+  const classification = classificationLine(session.classification, locale);
 
   return `
-    <a class="back" href="/">&larr; All sessions</a>
+    <a class="back" href="/">&larr; ${escapeHtml(t(locale, "backLink"))}</a>
     <div class="row">
       <h1>${escapeHtml(title)}</h1>
-      ${stageBadge(session.stage)}
+      ${stageBadge(session.stage, locale)}
     </div>
-    <p class="sub">${classification}${classification ? " · " : ""}started ${escapeHtml(new Date(session.created_at).toLocaleString())}</p>
-    ${renderInterview(session)}
-    ${renderScope(session)}
-    ${renderArchitecture(session)}
-    ${renderSchema(session)}
-    ${renderRoadmap(session)}`;
+    <p class="sub">${classification}${classification ? " · " : ""}${escapeHtml(t(locale, "started"))} ${escapeHtml(new Date(session.created_at).toLocaleString())}</p>
+    ${renderInterview(session, locale)}
+    ${renderScope(session, locale)}
+    ${renderArchitecture(session, locale)}
+    ${renderSchema(session, locale)}
+    ${renderRoadmap(session, locale)}`;
 }
 
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? "/", `http://127.0.0.1:${PORT}`);
+    const cookies = parseCookies(req.headers.cookie);
+    const queryLang = url.searchParams.get("lang");
+
+    let locale: Locale;
+    const headers: Record<string, string> = { "Content-Type": "text/html; charset=utf-8" };
+    if (isLocale(queryLang)) {
+      locale = queryLang;
+      headers["Set-Cookie"] = `lang=${locale}; Path=/; Max-Age=31536000; SameSite=Lax`;
+    } else if (isLocale(cookies.lang)) {
+      locale = cookies.lang;
+    } else {
+      locale = detectLocale(req.headers["accept-language"]);
+    }
 
     if (url.pathname === "/") {
-      const body = await renderList();
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(page("Senior Dev in a Box", body));
+      const body = await renderList(locale);
+      res.writeHead(200, headers);
+      res.end(page(APP_NAME, body, locale));
       return;
     }
 
     const match = url.pathname.match(/^\/session\/([^/]+)$/);
     if (match) {
-      const body = await renderDetail(decodeURIComponent(match[1]));
+      const body = await renderDetail(decodeURIComponent(match[1]), locale);
       if (!body) {
-        res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(page("Not found", `<p>No session with that id.</p><a href="/">&larr; All sessions</a>`));
+        res.writeHead(404, headers);
+        res.end(
+          page(
+            t(locale, "notFoundTitle"),
+            `<p>${escapeHtml(t(locale, "notFoundMessage"))}</p><a href="/">&larr; ${escapeHtml(t(locale, "backLink"))}</a>`,
+            locale
+          )
+        );
         return;
       }
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(page("Session — Senior Dev in a Box", body));
+      res.writeHead(200, headers);
+      res.end(page(`${APP_NAME}`, body, locale));
       return;
     }
 

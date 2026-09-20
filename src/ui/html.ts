@@ -1,3 +1,5 @@
+import { LOCALES, LOCALE_LABELS, type Locale } from "./i18n.js";
+
 export function escapeHtml(input: unknown): string {
   const text = input === undefined || input === null ? "" : String(input);
   return text
@@ -8,9 +10,14 @@ export function escapeHtml(input: unknown): string {
     .replace(/'/g, "&#39;");
 }
 
-export function page(title: string, body: string): string {
+export function page(title: string, body: string, locale: Locale = "en"): string {
+  const langBar = LOCALES.map((l) => {
+    const active = l === locale;
+    return `<a href="?lang=${l}" class="lang${active ? " lang-active" : ""}">${escapeHtml(LOCALE_LABELS[l])}</a>`;
+  }).join("");
+
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="${locale}">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -64,10 +71,20 @@ export function page(title: string, body: string): string {
   .sprint-name { font-weight: 600; }
   .empty { color: var(--muted); font-style: italic; }
   .back { display: inline-block; margin-bottom: 18px; font-size: 0.9rem; }
+  .langbar { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 20px; font-size: 0.78rem; }
+  .lang {
+    color: var(--muted); border: 1px solid var(--border); border-radius: 999px;
+    padding: 2px 9px; text-decoration: none;
+  }
+  .lang:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
+  .lang-active { color: var(--accent); border-color: var(--accent); font-weight: 600; }
 </style>
 </head>
 <body>
-  <div class="wrap">${body}</div>
+  <div class="wrap">
+    <div class="langbar">${langBar}</div>
+    ${body}
+  </div>
 </body>
 </html>`;
 }

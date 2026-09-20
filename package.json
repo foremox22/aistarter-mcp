@@ -1,6 +1,6 @@
 {
   "name": "aistarter-mcp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Senior Dev in a Box: an MCP server that interviews a beginner about their project idea and walks them through scope, architecture, database schema, and roadmap before any code gets written.",
   "type": "module",
   "license": "MIT",
