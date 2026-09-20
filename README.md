@@ -1,6 +1,6 @@
 # AiStarterMCP — Senior Dev in a Box
 
-An MCP server that acts as a senior-developer mentor for people just starting out with AI coding tools (Claude Code, Codex, Cursor, etc). Instead of jumping straight into code, it walks the human through a structured process before anything gets built:
+An MCP server that acts as a senior-developer mentor for people just starting out with AI coding tools (Claude Code, Codex, Cursor, opencode, etc). Instead of jumping straight into code, it walks the human through a structured process before anything gets built:
 
 1. **Classify** — experience level, then which AI tool they're using.
 2. **Interview** — one question at a time about the project idea.
@@ -32,6 +32,21 @@ Register with Cursor (`.cursor/mcp.json` or global MCP settings):
 {
   "mcpServers": {
     "aistarter": { "command": "npx", "args": ["-y", "aistarter-mcp"] }
+  }
+}
+```
+
+Register with [opencode](https://opencode.ai) (`opencode.json`, project-level or `~/.config/opencode/opencode.json` for global):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "aistarter": {
+      "type": "local",
+      "command": ["npx", "-y", "aistarter-mcp"],
+      "enabled": true
+    }
   }
 }
 ```
