@@ -1,0 +1,4 @@
+node_modules/
+dist/
+.aistarter-mcp/
+*.log
